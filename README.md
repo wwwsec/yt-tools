@@ -6,6 +6,7 @@
 
 - 获取 YouTube 频道的所有视频 ID（包括播放列表中的视频）
 - 获取 YouTube 视频的字幕（支持手动字幕和自动字幕）
+- 使用 Whisper 生成视频字幕
 - 支持多种语言的字幕获取
 - 支持纯文本格式的字幕输出
 - RESTful API 接口
@@ -21,7 +22,8 @@ app/
 ├── services/          # 服务层
 │   ├── __init__.py
 │   ├── channel_service.py    # 频道相关服务
-│   └── subtitle_service.py   # 字幕相关服务
+│   ├── subtitle_service.py   # 字幕相关服务
+│   └── audio_service.py      # 音频和 Whisper 相关服务
 ├── routes/            # 路由层
 │   ├── __init__.py
 │   └── api.py         # API 路由定义
@@ -107,6 +109,39 @@ GET /api/subtitles?video_id=<video_id>&lang=<lang>&pure_text=<pure_text>
 }
 ```
 
+### 获取 Whisper 生成的字幕
+
+使用 Whisper 模型生成视频字幕。
+
+**请求：**
+```
+GET /api/whisper/subtitles?video_id=<video_id>&lang=<lang>
+```
+
+**参数：**
+- `video_id` (必需): YouTube 视频 ID
+- `lang` (可选): 语言代码（例如：'en', 'zh'）
+
+**响应：**
+```json
+{
+    "status": "success",
+    "data": {
+        "video_id": "video_id",
+        "subtitles": {
+            "vtt": "WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\n字幕内容...",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 5.0,
+                    "text": "字幕内容..."
+                }
+            ]
+        }
+    }
+}
+```
+
 ## 错误处理
 
 所有 API 接口都使用统一的错误处理机制：
@@ -126,6 +161,9 @@ GET /api/subtitles?video_id=<video_id>&lang=<lang>&pure_text=<pure_text>
 
 - Flask: Web 框架
 - yt-dlp: YouTube 视频和字幕下载
+- openai-whisper: 语音识别和字幕生成
+- torch: Whisper 依赖
+- numpy: Whisper 依赖
 - Python 3.6+
 
 ## 注意事项
@@ -133,6 +171,8 @@ GET /api/subtitles?video_id=<video_id>&lang=<lang>&pure_text=<pure_text>
 1. 需要安装 Firefox 浏览器以支持字幕下载功能
 2. 某些视频可能没有字幕或自动字幕
 3. 频道视频获取可能会受到 YouTube API 限制
+4. Whisper 字幕生成需要下载音频文件，可能需要较长时间
+5. 首次运行时会下载 Whisper 模型，需要一定时间
 
 ## 贡献
 
