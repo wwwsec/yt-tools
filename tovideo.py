@@ -1,3 +1,4 @@
+#!/usr/bin/env /opt/anaconda3/envs/py3.12.02/bin/python 
 import argparse
 import asyncio
 import os
@@ -5,6 +6,8 @@ import webvtt
 from moviepy.editor import VideoFileClip, concatenate_videoclips, AudioFileClip, concatenate_audioclips
 import edge_tts
 from datetime import datetime, timedelta
+from pydub import AudioSegment
+import shutil
 
 # 解析命令行参数
 def parse_args():
@@ -16,6 +19,8 @@ def parse_args():
 
 # 将 VTT 时间格式（HH:MM:SS.mmm）转换为秒
 def vtt_time_to_seconds(vtt_time):
+    if len(vtt_time.split(':')) <3:
+        vtt_time = '00:' + vtt_time
     dt = datetime.strptime(vtt_time.split('.')[0], '%H:%M:%S')
     milliseconds = int(vtt_time.split('.')[1])
     return dt.hour * 3600 + dt.minute * 60 + dt.second + milliseconds / 1000
@@ -29,7 +34,8 @@ def seconds_to_vtt_time(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{milliseconds:03d}"
 
 # 使用 edge-tts 生成音频并返回音频时长
-async def generate_audio(text, output_audio, voice="zh-CN-XiaoxiaoNeural"):
+# async def generate_audio(text, output_audio, voice="zh-CN-XiaoxiaoNeural"):
+async def generate_audio(text, output_audio, voice="zh-CN-YunyangNeural"):
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(output_audio)
     audio_clip = AudioFileClip(output_audio)
@@ -61,6 +67,19 @@ async def process_vtt(vtt_file, output_audio_dir, output_vtt):
         audio_files.append(audio_file)
         total_duration += duration
 
+        # Calculate VTT duration
+        vtt_duration = vtt_time_to_seconds(caption.end) - vtt_time_to_seconds(caption.start)
+
+        # Add silence if the audio duration is less than the VTT duration
+        if duration < vtt_duration:
+            silence_duration = vtt_duration - duration
+            # Generate silence dynamically using pydub
+            silence = AudioSegment.silent(duration=silence_duration * 1000)  # duration in milliseconds
+            audio_clip = AudioSegment.from_file(audio_file)
+            audio_clip = audio_clip + silence
+            audio_clip.export(audio_file, format="mp3")
+            duration = vtt_duration
+
     # 写入新的 VTT 文件
     with open(output_vtt, 'w', encoding='utf-8') as f:
         f.write("WEBVTT\n\n")
@@ -68,17 +87,14 @@ async def process_vtt(vtt_file, output_audio_dir, output_vtt):
             f.write(f"{caption['start']} --> {caption['end']}\n{caption['text']}\n\n")
 
     # 合并音频
-    audio_clips = [AudioFileClip(af) for af in audio_files]
-    final_audio = concatenate_audioclips(audio_clips)
-    final_audio.write_audiofile(os.path.join(output_audio_dir, "final_audio.mp3"))
-    final_audio.close()
-    for clip in audio_clips:
-        clip.close()
+    audio_clips = [AudioSegment.from_file(af) for af in audio_files]
+    final_audio = sum(audio_clips)
+    final_audio.export(os.path.join(output_audio_dir, "final_audio.mp3"), format="mp3")
 
     # Debugging: Check audio clip durations
     for i, audio_clip in enumerate(audio_clips):
-        print(f"Audio clip {i} duration: {audio_clip.duration} seconds")
-        if audio_clip.duration == 0:
+        print(f"Audio clip {i} duration: {audio_clip.duration_seconds} seconds")
+        if audio_clip.duration_seconds == 0:
             print(f"Warning: Audio clip {i} is empty.")
 
     return audio_files, total_duration
@@ -89,6 +105,7 @@ def process_video(video_file, vtt_file, new_vtt_file, output_dir):
     new_vtt = webvtt.read(new_vtt_file)
     video = VideoFileClip(video_file)
     video_segments = []
+    video_duration = video.duration
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -96,6 +113,15 @@ def process_video(video_file, vtt_file, new_vtt_file, output_dir):
     for i, (old_caption, new_caption) in enumerate(zip(vtt, new_vtt)):
         old_start = vtt_time_to_seconds(old_caption.start)
         old_end = vtt_time_to_seconds(old_caption.end)
+
+        # Ensure old_start and old_end are within the video duration
+        if old_start >= video_duration:
+            print(f"Warning: old_start ({old_start}) is beyond video duration ({video_duration}). Skipping segment.")
+            continue
+        if old_end > video_duration:
+            print(f"Warning: old_end ({old_end}) is beyond video duration ({video_duration}). Adjusting to video duration.")
+            old_end = video_duration
+
         new_start = vtt_time_to_seconds(new_caption.start)
         new_end = vtt_time_to_seconds(new_caption.end)
 
@@ -158,9 +184,9 @@ async def main():
     if os.path.exists(new_vtt_file):
         os.remove(new_vtt_file)
     if os.path.exists(output_audio_dir):
-        os.rmdir(output_audio_dir)
+        shutil.rmtree(output_audio_dir)
     if os.path.exists(output_video_dir):
-        os.rmdir(output_video_dir)
+        shutil.rmtree(output_video_dir)
 
 if __name__ == "__main__":
     asyncio.run(main())
